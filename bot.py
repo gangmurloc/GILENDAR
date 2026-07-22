@@ -1,6 +1,7 @@
+import html
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
@@ -58,7 +59,9 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tz = ZoneInfo(config.TIMEZONE)
     start_of_day = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
     events = calendar_service.list_events(start_of_day, start_of_day + timedelta(days=1))
-    await update.message.reply_text(_format_events(events, tz) or "오늘 일정이 없습니다.")
+    await update.message.reply_text(
+        _format_events(events, tz) or "오늘 일정이 없습니다.", parse_mode="HTML"
+    )
 
 
 async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,7 +70,9 @@ async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tz = ZoneInfo(config.TIMEZONE)
     start_of_day = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
     events = calendar_service.list_events(start_of_day, start_of_day + timedelta(days=7))
-    await update.message.reply_text(_format_events(events, tz) or "이번 주 일정이 없습니다.")
+    await update.message.reply_text(
+        _format_events(events, tz) or "이번 주 일정이 없습니다.", parse_mode="HTML"
+    )
 
 
 async def free(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -76,7 +81,7 @@ async def free(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tz = ZoneInfo(config.TIMEZONE)
     now = datetime.now(tz)
     slots = free_time.free_slots_for_range(now, days=7)
-    await update.message.reply_text(free_time.format_free_slots(slots))
+    await update.message.reply_text(_format_free_display(slots), parse_mode="HTML")
 
 
 async def daily_digest(context: ContextTypes.DEFAULT_TYPE):
@@ -85,17 +90,23 @@ async def daily_digest(context: ContextTypes.DEFAULT_TYPE):
     events = calendar_service.list_events(start_of_day, start_of_day + timedelta(days=1))
     slots = free_time.free_slots_for_range(start_of_day, days=1)
     lines = [
-        "좋은 아침입니다! 오늘 일정:",
+        "<b>☀️ 좋은 아침입니다! 오늘 일정</b>",
         _format_events(events, tz) or "오늘 일정이 없습니다.",
         "",
-        "오늘 자유시간:",
-        free_time.format_free_slots(slots),
+        "<b>🕳️ 오늘 자유시간</b>",
+        _format_free_display(slots),
     ]
-    await context.bot.send_message(chat_id=config.TELEGRAM_OWNER_ID, text="\n".join(lines))
+    await context.bot.send_message(
+        chat_id=config.TELEGRAM_OWNER_ID, text="\n".join(lines), parse_mode="HTML"
+    )
+
+
+def _esc(text: str) -> str:
+    return html.escape(text)
 
 
 def _describe_event_dict(ev: dict, tz: ZoneInfo) -> str:
-    title = ev.get("summary", "(제목 없음)")
+    title = _esc(ev.get("summary", "(제목 없음)"))
     date_time = ev["start"].get("dateTime")
     if date_time:
         dt = datetime.fromisoformat(date_time).astimezone(tz)
@@ -107,11 +118,47 @@ def _describe_event_dict(ev: dict, tz: ZoneInfo) -> str:
 
 
 def _format_events(events: list[dict], tz: ZoneInfo) -> str:
-    return "\n".join(f"- {_describe_event_dict(ev, tz)}" for ev in events)
+    """날짜별로 묶어서 굵은 날짜 헤더 아래 시간순으로 보여준다."""
+    day_lines: dict[date, list[str]] = {}
+    order: list[date] = []
+    for ev in events:
+        title = _esc(ev.get("summary", "(제목 없음)"))
+        date_time = ev["start"].get("dateTime")
+        if date_time:
+            dt = datetime.fromisoformat(date_time).astimezone(tz)
+            day = dt.date()
+            line = f"🕐 {dt.strftime('%H:%M')} {title}"
+        else:
+            day = datetime.strptime(ev["start"]["date"], "%Y-%m-%d").date()
+            line = f"🗓️ 종일 {title}"
+        if day not in day_lines:
+            day_lines[day] = []
+            order.append(day)
+        day_lines[day].append(line)
+
+    blocks = []
+    for day in order:
+        weekday = WEEKDAY_KR[day.weekday()]
+        header = f"<b>{day.month}/{day.day}({weekday})</b>"
+        blocks.append(header + "\n" + "\n".join(day_lines[day]))
+    return "\n\n".join(blocks)
+
+
+def _format_free_display(slots: list[tuple]) -> str:
+    blocks = []
+    for day, free_ranges in slots:
+        weekday = WEEKDAY_KR[day.weekday()]
+        header = f"<b>{day.month}/{day.day}({weekday})</b>"
+        if not free_ranges:
+            blocks.append(f"{header}\n자유시간 없음")
+        else:
+            body = "\n".join(f"🕐 {s.strftime('%H:%M')}~{e.strftime('%H:%M')}" for s, e in free_ranges)
+            blocks.append(f"{header}\n{body}")
+    return "\n\n".join(blocks)
 
 
 def _format_add_preview(events: list[ParsedEvent]) -> str:
-    lines = ["다음 일정을 등록할까요?\n"]
+    lines = ["<b>다음 일정을 등록할까요?</b>\n"]
     for ev in events:
         dt = datetime.strptime(ev.date, "%Y-%m-%d")
         weekday = WEEKDAY_KR[dt.weekday()]
@@ -123,15 +170,16 @@ def _format_add_preview(events: list[ParsedEvent]) -> str:
             time_part = ev.start_time
         recur_part = RECURRENCE_LABEL.get(ev.recurrence, "")
         reminder_part = f" ({ev.reminder_minutes}분 전 알림)" if ev.reminder_minutes else ""
-        lines.append(f"- {ev.date}({weekday}) {time_part} {ev.title}{recur_part}{reminder_part}")
+        title = _esc(ev.title)
+        lines.append(f"🕐 {ev.date}({weekday}) {time_part} {title}{recur_part}{reminder_part}")
         for other in calendar_service.find_overlaps(ev):
-            other_title = other.get("summary", "(제목 없음)")
+            other_title = _esc(other.get("summary", "(제목 없음)"))
             lines.append(f"  ⚠️ 기존 '{other_title}' 일정과 시간이 겹쳐요")
     return "\n".join(lines)
 
 
 def _format_update_preview(updates: list[EventUpdate], tz: ZoneInfo) -> str:
-    lines = ["다음과 같이 변경할까요?\n"]
+    lines = ["<b>다음과 같이 변경할까요?</b>\n"]
     for u in updates:
         try:
             before = _describe_event_dict(calendar_service.get_event(u.event_id), tz)
@@ -146,18 +194,19 @@ def _format_update_preview(updates: list[EventUpdate], tz: ZoneInfo) -> str:
             time_part = f"{u.start_time}~{u.end_time}"
         else:
             time_part = u.start_time
-        lines.append(f"- {before}\n  → {u.date}({weekday}) {time_part} {u.title}")
+        title = _esc(u.title)
+        lines.append(f"🕐 {before}\n  → {u.date}({weekday}) {time_part} {title}")
     return "\n".join(lines)
 
 
 def _format_delete_preview(delete_ids: list[str], tz: ZoneInfo) -> str:
-    lines = ["다음 일정을 삭제할까요?\n"]
+    lines = ["<b>다음 일정을 삭제할까요?</b>\n"]
     for event_id in delete_ids:
         try:
-            lines.append(f"- {_describe_event_dict(calendar_service.get_event(event_id), tz)}")
+            lines.append(f"🕐 {_describe_event_dict(calendar_service.get_event(event_id), tz)}")
         except Exception:
             logger.exception("Failed to fetch event to delete: %s", event_id)
-            lines.append(f"- (조회 실패: {event_id})")
+            lines.append(f"🕐 (조회 실패: {event_id})")
     return "\n".join(lines)
 
 
@@ -268,7 +317,7 @@ async def _process_result(update: Update, context: ContextTypes.DEFAULT_TYPE, re
             ]
         ]
     )
-    await update.message.reply_text(preview, reply_markup=keyboard)
+    await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,13 +346,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 created.append((ev, created_event))
             except Exception:
                 logger.exception("Failed to create event: %s", ev)
-        lines = [f"{len(created)}개 일정을 등록했습니다." if created else "등록에 실패했습니다."]
+        lines = [f"<b>{len(created)}개 일정을 등록했습니다.</b>" if created else "등록에 실패했습니다."]
         for ev, created_event in created:
-            lines.append(f"- {ev.date} {ev.start_time} {ev.title}")
+            title = _esc(ev.title)
             link = created_event.get("htmlLink")
             if link:
-                lines.append(f"  {link}")
-        await query.edit_message_text("\n".join(lines))
+                lines.append(f"🕐 {ev.date} {ev.start_time} <a href=\"{link}\">{title}</a>")
+            else:
+                lines.append(f"🕐 {ev.date} {ev.start_time} {title}")
+        await query.edit_message_text("\n".join(lines), parse_mode="HTML")
     elif action == "update":
         updated = 0
         for u in payload["updates"]:
