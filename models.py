@@ -7,7 +7,21 @@ class ParsedEvent(BaseModel):
     start_time: str  # HH:MM, 24h
     end_time: str  # HH:MM, empty string if not specified
     all_day: bool
+    recurrence: str  # "", "daily", or "weekly"
 
 
-class ParsedEventList(BaseModel):
-    events: list[ParsedEvent]
+class EventUpdate(BaseModel):
+    event_id: str  # must match an id from the given calendar context
+    title: str
+    date: str
+    start_time: str
+    end_time: str
+    all_day: bool
+
+
+class AssistantResponse(BaseModel):
+    action: str  # "add", "update", "delete", or "question"
+    events: list[ParsedEvent]  # filled when action == "add"
+    updates: list[EventUpdate]  # filled when action == "update"
+    delete_ids: list[str]  # filled when action == "delete", ids from the calendar context
+    reply: str  # filled when action == "question"
