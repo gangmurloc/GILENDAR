@@ -44,6 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "예: 목요일 랩미팅 취소해줘 / 수요일 랩미팅 7시로 옮겨줘\n\n"
         "일정/자유시간에 대해 그냥 물어봐도 됩니다.\n"
         "예: 이번 주 일정 알려줘 / 오늘 남는 시간에 뭐하면 좋을까?\n\n"
+        "시간표나 포스터 사진을 보내도 읽어서 일정으로 등록할 수 있고, 음성 메시지로 말해도 됩니다.\n\n"
         f"매일 아침 {config.MORNING_DIGEST_HOUR}시에 오늘 일정을 먼저 알려드려요.\n\n"
         "/today - 오늘 일정 보기\n"
         "/week - 이번 주 일정 보기\n"
@@ -168,12 +169,68 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(tz)
     try:
         calendar_context = free_time.build_calendar_context(now)
-        result = handle_message(update.message.text, now, calendar_context)
+        result = handle_message(now, calendar_context, text=update.message.text)
     except Exception:
         logger.exception("Gemini request failed")
         await update.message.reply_text("요청을 처리하지 못했어요. 다시 표현해 주세요.")
         return
 
+    await _process_result(update, context, result, tz)
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_owner(update):
+        await update.message.reply_text("이 봇은 개인용입니다.")
+        return
+
+    tz = ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    try:
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = bytes(await photo_file.download_as_bytearray())
+        calendar_context = free_time.build_calendar_context(now)
+        result = handle_message(
+            now,
+            calendar_context,
+            text=update.message.caption or "",
+            media_bytes=image_bytes,
+            media_mime_type="image/jpeg",
+        )
+    except Exception:
+        logger.exception("Gemini image request failed")
+        await update.message.reply_text("이미지를 처리하지 못했어요. 다시 시도해 주세요.")
+        return
+
+    await _process_result(update, context, result, tz)
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_owner(update):
+        await update.message.reply_text("이 봇은 개인용입니다.")
+        return
+
+    tz = ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    try:
+        voice_file = await update.message.voice.get_file()
+        audio_bytes = bytes(await voice_file.download_as_bytearray())
+        calendar_context = free_time.build_calendar_context(now)
+        result = handle_message(
+            now,
+            calendar_context,
+            text="",
+            media_bytes=audio_bytes,
+            media_mime_type="audio/ogg",
+        )
+    except Exception:
+        logger.exception("Gemini voice request failed")
+        await update.message.reply_text("음성을 처리하지 못했어요. 다시 시도해 주세요.")
+        return
+
+    await _process_result(update, context, result, tz)
+
+
+async def _process_result(update: Update, context: ContextTypes.DEFAULT_TYPE, result, tz: ZoneInfo):
     if result.action == "question":
         await update.message.reply_text(result.reply or "무슨 말인지 이해하지 못했어요.")
         return
@@ -253,14 +310,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.exception("Failed to update event: %s", u)
         await query.edit_message_text(f"{updated}개 일정을 변경했습니다." if updated else "변경에 실패했습니다.")
     elif action == "delete":
-        deleted = 0
+        deleted_bodies = []
         for event_id in payload["delete_ids"]:
             try:
+                original = calendar_service.get_event(event_id)
                 calendar_service.delete_event(event_id)
-                deleted += 1
+                deleted_bodies.append(original)
             except Exception:
                 logger.exception("Failed to delete event: %s", event_id)
-        await query.edit_message_text(f"{deleted}개 일정을 삭제했습니다." if deleted else "삭제에 실패했습니다.")
+
+        if not deleted_bodies:
+            await query.edit_message_text("삭제에 실패했습니다.")
+            return
+
+        restore_token = uuid.uuid4().hex[:8]
+        context.chat_data.setdefault("pending", {})[restore_token] = {
+            "action": "restore",
+            "events": deleted_bodies,
+        }
+        restore_keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("↩️ 되돌리기", callback_data=f"confirm:{restore_token}")]]
+        )
+        await query.edit_message_text(f"{len(deleted_bodies)}개 일정을 삭제했습니다.", reply_markup=restore_keyboard)
+    elif action == "restore":
+        restored = 0
+        for original in payload["events"]:
+            try:
+                calendar_service.restore_event(original)
+                restored += 1
+            except Exception:
+                logger.exception("Failed to restore event: %s", original)
+        await query.edit_message_text(f"{restored}개 일정을 복구했습니다." if restored else "복구에 실패했습니다.")
 
 
 def main():
@@ -272,6 +352,8 @@ def main():
     app.add_handler(CommandHandler("free", free))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.job_queue.run_repeating(reminder_service.check_reminders, interval=60, first=5)
     app.job_queue.run_daily(
         daily_digest,

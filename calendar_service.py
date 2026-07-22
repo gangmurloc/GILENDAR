@@ -95,6 +95,30 @@ def delete_event(event_id: str) -> None:
     service.events().delete(calendarId=config.GOOGLE_CALENDAR_ID, eventId=event_id).execute()
 
 
+_NON_INSERTABLE_FIELDS = {
+    "id",
+    "etag",
+    "htmlLink",
+    "iCalUID",
+    "sequence",
+    "created",
+    "updated",
+    "creator",
+    "organizer",
+    "kind",
+    "status",
+    "recurringEventId",
+    "originalStartTime",
+}
+
+
+def restore_event(original: dict) -> dict:
+    """삭제된 이벤트를 새 이벤트로 다시 만든다 (원래 반복 일정의 한 회차였어도 단일 일정으로 복구)."""
+    service = get_service()
+    body = {k: v for k, v in original.items() if k not in _NON_INSERTABLE_FIELDS}
+    return service.events().insert(calendarId=config.GOOGLE_CALENDAR_ID, body=body).execute()
+
+
 def get_event(event_id: str) -> dict:
     service = get_service()
     return service.events().get(calendarId=config.GOOGLE_CALENDAR_ID, eventId=event_id).execute()
