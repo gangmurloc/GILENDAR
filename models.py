@@ -8,6 +8,7 @@ class ParsedEvent(BaseModel):
     end_time: str  # HH:MM, empty string if not specified
     all_day: bool
     recurrence: str  # "", "daily", or "weekly"
+    reminder_minutes: str  # minutes before start as a string (e.g. "60"), "" to use the default
 
 
 class EventUpdate(BaseModel):

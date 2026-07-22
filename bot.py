@@ -122,7 +122,8 @@ def _format_add_preview(events: list[ParsedEvent]) -> str:
         else:
             time_part = ev.start_time
         recur_part = RECURRENCE_LABEL.get(ev.recurrence, "")
-        lines.append(f"- {ev.date}({weekday}) {time_part} {ev.title}{recur_part}")
+        reminder_part = f" ({ev.reminder_minutes}분 전 알림)" if ev.reminder_minutes else ""
+        lines.append(f"- {ev.date}({weekday}) {time_part} {ev.title}{recur_part}{reminder_part}")
         for other in calendar_service.find_overlaps(ev):
             other_title = other.get("summary", "(제목 없음)")
             lines.append(f"  ⚠️ 기존 '{other_title}' 일정과 시간이 겹쳐요")
@@ -292,13 +293,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         created = []
         for ev in payload["events"]:
             try:
-                calendar_service.create_event(ev)
-                created.append(ev)
+                created_event = calendar_service.create_event(ev)
+                created.append((ev, created_event))
             except Exception:
                 logger.exception("Failed to create event: %s", ev)
         lines = [f"{len(created)}개 일정을 등록했습니다." if created else "등록에 실패했습니다."]
-        for ev in created:
+        for ev, created_event in created:
             lines.append(f"- {ev.date} {ev.start_time} {ev.title}")
+            link = created_event.get("htmlLink")
+            if link:
+                lines.append(f"  {link}")
         await query.edit_message_text("\n".join(lines))
     elif action == "update":
         updated = 0

@@ -59,13 +59,16 @@ def _event_body(ev: ParsedEvent) -> dict:
         start_body = {"dateTime": start_dt, "timeZone": config.TIMEZONE}
         end_body = {"dateTime": end_dt, "timeZone": config.TIMEZONE}
 
+    reminder_minutes_raw = getattr(ev, "reminder_minutes", "")
+    reminder_minutes = int(reminder_minutes_raw) if reminder_minutes_raw else config.CALENDAR_REMINDER_MINUTES
+
     body = {
         "summary": ev.title,
         "start": start_body,
         "end": end_body,
         "reminders": {
             "useDefault": False,
-            "overrides": [{"method": "popup", "minutes": config.CALENDAR_REMINDER_MINUTES}],
+            "overrides": [{"method": "popup", "minutes": reminder_minutes}],
         },
     }
     recurrence = getattr(ev, "recurrence", "")
