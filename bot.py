@@ -15,6 +15,8 @@ from telegram.ext import (
     filters,
 )
 
+from google.genai import errors as genai_errors
+
 import calendar_service
 import config
 import free_time
@@ -28,6 +30,16 @@ logger = logging.getLogger(__name__)
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 RECURRENCE_LABEL = {"daily": " (매일 반복)", "weekly": " (매주 반복)"}
 CATEGORY_EMOJI = {"수업": "📘", "회의": "🧑‍🤝‍🧑", "약속": "🍽️", "기타": "📌"}
+
+
+def _friendly_error_message(exc: Exception, fallback: str) -> str:
+    if isinstance(exc, genai_errors.ClientError) and exc.code == 429:
+        return (
+            "⏳ Gemini 무료 사용량을 오늘 다 써서 지금은 응답할 수 없어요.\n"
+            "무료 한도는 하루 단위로 초기화되니 내일 다시 시도하거나, "
+            "자주 쓰실 거면 Google AI Studio에서 결제(종량제)를 켜는 걸 추천해요."
+        )
+    return fallback
 
 
 def _is_owner(update: Update) -> bool:
@@ -231,9 +243,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         calendar_context = free_time.build_calendar_context(now)
         result = handle_message(now, calendar_context, text=update.message.text)
-    except Exception:
+    except Exception as e:
         logger.exception("Gemini request failed")
-        await update.message.reply_text("요청을 처리하지 못했어요. 다시 표현해 주세요.")
+        await update.message.reply_text(_friendly_error_message(e, "요청을 처리하지 못했어요. 다시 표현해 주세요."))
         return
 
     await _process_result(update, context, result, tz)
@@ -257,9 +269,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             media_bytes=image_bytes,
             media_mime_type="image/jpeg",
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Gemini image request failed")
-        await update.message.reply_text("이미지를 처리하지 못했어요. 다시 시도해 주세요.")
+        await update.message.reply_text(_friendly_error_message(e, "이미지를 처리하지 못했어요. 다시 시도해 주세요."))
         return
 
     await _process_result(update, context, result, tz)
@@ -283,9 +295,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             media_bytes=audio_bytes,
             media_mime_type="audio/ogg",
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Gemini voice request failed")
-        await update.message.reply_text("음성을 처리하지 못했어요. 다시 시도해 주세요.")
+        await update.message.reply_text(_friendly_error_message(e, "음성을 처리하지 못했어요. 다시 시도해 주세요."))
         return
 
     await _process_result(update, context, result, tz)
