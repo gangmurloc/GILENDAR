@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 RECURRENCE_LABEL = {"daily": " (매일 반복)", "weekly": " (매주 반복)"}
+CATEGORY_EMOJI = {"수업": "📘", "회의": "🧑‍🤝‍🧑", "약속": "🍽️", "기타": "📌"}
 
 
 def _is_owner(update: Update) -> bool:
@@ -171,7 +172,8 @@ def _format_add_preview(events: list[ParsedEvent]) -> str:
         recur_part = RECURRENCE_LABEL.get(ev.recurrence, "")
         reminder_part = f" ({ev.reminder_minutes}분 전 알림)" if ev.reminder_minutes else ""
         title = _esc(ev.title)
-        lines.append(f"🕐 {ev.date}({weekday}) {time_part} {title}{recur_part}{reminder_part}")
+        emoji = CATEGORY_EMOJI.get(ev.category, "🕐")
+        lines.append(f"{emoji} {ev.date}({weekday}) {time_part} {title}{recur_part}{reminder_part}")
         for other in calendar_service.find_overlaps(ev):
             other_title = _esc(other.get("summary", "(제목 없음)"))
             lines.append(f"  ⚠️ 기존 '{other_title}' 일정과 시간이 겹쳐요")
@@ -349,11 +351,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = [f"<b>{len(created)}개 일정을 등록했습니다.</b>" if created else "등록에 실패했습니다."]
         for ev, created_event in created:
             title = _esc(ev.title)
+            emoji = CATEGORY_EMOJI.get(ev.category, "🕐")
             link = created_event.get("htmlLink")
             if link:
-                lines.append(f"🕐 {ev.date} {ev.start_time} <a href=\"{link}\">{title}</a>")
+                lines.append(f"{emoji} {ev.date} {ev.start_time} <a href=\"{link}\">{title}</a>")
             else:
-                lines.append(f"🕐 {ev.date} {ev.start_time} {title}")
+                lines.append(f"{emoji} {ev.date} {ev.start_time} {title}")
         await query.edit_message_text("\n".join(lines), parse_mode="HTML")
     elif action == "update":
         updated = 0

@@ -15,6 +15,13 @@ _RECURRENCE_RULES = {
     "weekly": ["RRULE:FREQ=WEEKLY"],
 }
 
+# Google Calendar event colorId reference: https://developers.google.com/calendar/api/v3/reference/colors
+_CATEGORY_COLOR_IDS = {
+    "수업": "7",  # Peacock (blue)
+    "회의": "6",  # Tangerine (orange)
+    "약속": "10",  # Basil (green)
+}
+
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 _service = None
@@ -74,6 +81,11 @@ def _event_body(ev: ParsedEvent) -> dict:
     recurrence = getattr(ev, "recurrence", "")
     if recurrence in _RECURRENCE_RULES:
         body["recurrence"] = _RECURRENCE_RULES[recurrence]
+
+    category = getattr(ev, "category", "")
+    if category in _CATEGORY_COLOR_IDS:
+        body["colorId"] = _CATEGORY_COLOR_IDS[category]
+
     return body
 
 

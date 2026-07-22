@@ -9,6 +9,7 @@ class ParsedEvent(BaseModel):
     all_day: bool
     recurrence: str  # "", "daily", or "weekly"
     reminder_minutes: str  # minutes before start as a string (e.g. "60"), "" to use the default
+    category: str  # "수업", "회의", "약속", or "기타"
 
 
 class EventUpdate(BaseModel):
