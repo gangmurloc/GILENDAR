@@ -106,13 +106,22 @@ def _esc(text: str) -> str:
     return html.escape(text)
 
 
+def _time_range(ev: dict, tz: ZoneInfo) -> str:
+    start_dt = datetime.fromisoformat(ev["start"]["dateTime"]).astimezone(tz)
+    end_raw = ev.get("end", {}).get("dateTime")
+    if end_raw:
+        end_dt = datetime.fromisoformat(end_raw).astimezone(tz)
+        return f"{start_dt.strftime('%H:%M')}~{end_dt.strftime('%H:%M')}"
+    return start_dt.strftime("%H:%M")
+
+
 def _describe_event_dict(ev: dict, tz: ZoneInfo) -> str:
     title = _esc(ev.get("summary", "(제목 없음)"))
     date_time = ev["start"].get("dateTime")
     if date_time:
         dt = datetime.fromisoformat(date_time).astimezone(tz)
         weekday = WEEKDAY_KR[dt.weekday()]
-        return f"{dt.month}/{dt.day}({weekday}) {dt.strftime('%H:%M')} {title}"
+        return f"{dt.month}/{dt.day}({weekday}) {_time_range(ev, tz)} {title}"
     d = datetime.strptime(ev["start"]["date"], "%Y-%m-%d")
     weekday = WEEKDAY_KR[d.weekday()]
     return f"{d.month}/{d.day}({weekday}) 종일 {title}"
@@ -128,7 +137,7 @@ def _format_events(events: list[dict], tz: ZoneInfo) -> str:
         if date_time:
             dt = datetime.fromisoformat(date_time).astimezone(tz)
             day = dt.date()
-            line = f"🕐 {dt.strftime('%H:%M')} {title}"
+            line = f"🕐 {_time_range(ev, tz)} {title}"
         else:
             day = datetime.strptime(ev["start"]["date"], "%Y-%m-%d").date()
             line = f"🗓️ 종일 {title}"

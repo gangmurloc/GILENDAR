@@ -50,7 +50,13 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE):
         key = ev["id"]
         if now >= remind_at and key not in notified:
             title = ev.get("summary", "(제목 없음)")
-            time_str = start_dt.astimezone(tz).strftime("%H:%M")
+            start_str = start_dt.astimezone(tz).strftime("%H:%M")
+            end_raw = ev.get("end", {}).get("dateTime")
+            if end_raw:
+                end_str = datetime.fromisoformat(end_raw).astimezone(tz).strftime("%H:%M")
+                time_str = f"{start_str}~{end_str}"
+            else:
+                time_str = start_str
             await context.bot.send_message(
                 chat_id=config.TELEGRAM_OWNER_ID,
                 text=f"⏰ {_popup_minutes(ev)}분 후 일정: {title} ({time_str})",
