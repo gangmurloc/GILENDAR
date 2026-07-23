@@ -1,18 +1,18 @@
+import base64
 from datetime import datetime
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 import config
 from models import AssistantResponse
 
-_client = genai.Client(api_key=config.GEMINI_API_KEY)
+_client = OpenAI(api_key=config.FACTCHAT_API_KEY, base_url=config.FACTCHAT_BASE_URL)
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
-SYSTEM_INSTRUCTION = """너는 사용자의 개인 캘린더 비서다. 사용자가 보낸 메시지(텍스트, 이미지, 음성 중 하나 이상)를 보고 action을 다음 넷 중 하나로 정한다: "add", "update", "delete", "question".
+SYSTEM_INSTRUCTION = """너는 사용자의 개인 캘린더 비서다. 사용자가 보낸 메시지(텍스트, 이미지 중 하나 이상)를 보고 action을 다음 넷 중 하나로 정한다: "add", "update", "delete", "question".
 
-이미지(시간표, 포스터, 강의계획서 스크린샷 등)가 첨부되면 그 안에 적힌 요일/시간/과목명·행사명을 읽어서 아래 규칙에 따라 이벤트로 변환한다. 이미지에 여러 일정이 있으면 전부 각각의 이벤트로 만든다. 음성이 첨부되면 사용자가 말한 내용을 그대로 텍스트 메시지로 받은 것처럼 동일하게 처리한다.
+이미지(시간표, 포스터, 강의계획서 스크린샷 등)가 첨부되면 그 안에 적힌 요일/시간/과목명·행사명을 읽어서 아래 규칙에 따라 이벤트로 변환한다. 이미지에 여러 일정이 있으면 전부 각각의 이벤트로 만든다.
 
 1) add — 새 일정을 등록해달라는 요청 (예: "수요일 6시 랩미팅", "목요일 금요일 15~17시 특강"):
    - events에 새 이벤트들을 채운다. updates, delete_ids는 빈 리스트, reply는 빈 문자열로 둔다.
@@ -46,6 +46,65 @@ SYSTEM_INSTRUCTION = """너는 사용자의 개인 캘린더 비서다. 사용�
    - 자유시간 활용을 물으면 그 시간의 길이와 앞뒤 일정 맥락을 고려해 구체적인 활동을 제안한다. 근거 없는 뜬금없는 제안은 하지 않는다.
 """
 
+_EVENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "date": {"type": "string"},
+        "start_time": {"type": "string"},
+        "end_time": {"type": "string"},
+        "all_day": {"type": "boolean"},
+        "recurrence": {"type": "string"},
+        "reminder_minutes": {"type": "string"},
+        "category": {"type": "string"},
+    },
+    "required": [
+        "title",
+        "date",
+        "start_time",
+        "end_time",
+        "all_day",
+        "recurrence",
+        "reminder_minutes",
+        "category",
+    ],
+    "additionalProperties": False,
+}
+
+_UPDATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "event_id": {"type": "string"},
+        "title": {"type": "string"},
+        "date": {"type": "string"},
+        "start_time": {"type": "string"},
+        "end_time": {"type": "string"},
+        "all_day": {"type": "boolean"},
+    },
+    "required": ["event_id", "title", "date", "start_time", "end_time", "all_day"],
+    "additionalProperties": False,
+}
+
+_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "assistant_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "events": {"type": "array", "items": _EVENT_SCHEMA},
+                "updates": {"type": "array", "items": _UPDATE_SCHEMA},
+                "delete_ids": {"type": "array", "items": {"type": "string"}},
+                "reply": {"type": "string"},
+            },
+            "required": ["action", "events", "updates", "delete_ids", "reply"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 
 def handle_message(
     now: datetime,
@@ -57,23 +116,30 @@ def handle_message(
     weekday = WEEKDAY_KR[now.weekday()]
     header = (
         f"오늘은 {now.strftime('%Y-%m-%d')} ({weekday}요일), 현재 시각은 {now.strftime('%H:%M')}이다.\n\n"
-        f"{calendar_context}\n\n"
+        f"{calendar_context}"
     )
-    contents = [header]
-    if media_bytes is not None:
-        contents.append(types.Part.from_bytes(data=media_bytes, mime_type=media_mime_type))
-        contents.append(f"위 첨부 파일과 함께 온 사용자 메시지(없을 수도 있음): {text}")
-    else:
-        contents.append(f"사용자 메시지: {text}")
 
-    response = _client.models.generate_content(
-        model=config.GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=AssistantResponse,
-            temperature=0.2,
-        ),
+    user_content = [{"type": "text", "text": header}]
+    if media_bytes is not None:
+        image_b64 = base64.b64encode(media_bytes).decode("utf-8")
+        user_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_mime_type};base64,{image_b64}"},
+            }
+        )
+        user_content.append(
+            {"type": "text", "text": f"위 첨부 이미지와 함께 온 사용자 메시지(없을 수도 있음): {text}"}
+        )
+    else:
+        user_content.append({"type": "text", "text": f"사용자 메시지: {text}"})
+
+    response = _client.chat.completions.create(
+        model=config.FACTCHAT_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": user_content},
+        ],
+        response_format=_RESPONSE_FORMAT,
     )
-    return AssistantResponse.model_validate_json(response.text)
+    return AssistantResponse.model_validate_json(response.choices[0].message.content)

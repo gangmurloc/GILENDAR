@@ -15,8 +15,9 @@ def _require(name: str) -> str:
 TELEGRAM_BOT_TOKEN = _require("TELEGRAM_BOT_TOKEN")
 TELEGRAM_OWNER_ID = int(_require("TELEGRAM_OWNER_ID"))
 
-GEMINI_API_KEY = _require("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+FACTCHAT_API_KEY = _require("FACTCHAT_API_KEY")
+FACTCHAT_BASE_URL = os.getenv("FACTCHAT_BASE_URL", "https://factchat-cloud.mindlogic.ai/v1/gateway")
+FACTCHAT_MODEL = os.getenv("FACTCHAT_MODEL", "gpt-5.6-luna")
 
 GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Seoul")
