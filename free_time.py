@@ -77,7 +77,13 @@ def build_calendar_context(now: datetime) -> str:
         if date_time:
             dt = datetime.fromisoformat(date_time).astimezone(tz)
             weekday = WEEKDAY_KR[dt.weekday()]
-            event_lines.append(f"- [id:{event_id}] {dt.month}/{dt.day}({weekday}) {dt.strftime('%H:%M')} {title}")
+            end_raw = ev.get("end", {}).get("dateTime")
+            if end_raw:
+                end_dt = datetime.fromisoformat(end_raw).astimezone(tz)
+                time_part = f"{dt.strftime('%H:%M')}~{end_dt.strftime('%H:%M')}"
+            else:
+                time_part = dt.strftime("%H:%M")
+            event_lines.append(f"- [id:{event_id}] {dt.month}/{dt.day}({weekday}) {time_part} {title}")
         else:
             d = datetime.strptime(ev["start"]["date"], "%Y-%m-%d")
             weekday = WEEKDAY_KR[d.weekday()]
